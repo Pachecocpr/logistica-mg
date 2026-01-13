@@ -22,18 +22,24 @@ try:
     # Carregar dados
     df_base = pd.read_csv('municipios_mg.csv')
 
-    # --- BARRA LATERAL (SIDEBAR) ---
-    st.sidebar.header("📍 Configurações de Origem")
-    
-    # Campo de Endereço de Origem (Apenas rótulo para o Excel)
-    endereco_origem = st.sidebar.text_input("Endereço de Partida:", "Rua Simão Antonio, 149, Contagem - MG")
-    
-    # Coordenadas de Origem (Onde o cálculo realmente acontece)
-    col_lat, col_lon = st.sidebar.columns(2)
-    lat_p = col_lat.number_input("Lat Origem:", value=-19.9203, format="%.4f")
-    lon_p = col_lon.number_input("Lon Origem:", value=-44.0466, format="%.4f")
+# --- BARRA LATERAL (SIDEBAR) ---
+st.sidebar.header("📍 Configurações de Origem")
 
-    st.sidebar.divider()
+# 1. Campo de endereço começando vazio
+endereco_origem = st.sidebar.text_input("Endereço de Partida:", value="")
+
+# 2. Coordenadas começando zeradas ou vazias
+col_lat, col_lon = st.sidebar.columns(2)
+lat_p = col_lat.number_input("Lat Origem:", value=0.0, format="%.4f")
+lon_p = col_lon.number_input("Lon Origem:", value=0.0, format="%.4f")
+
+st.sidebar.divider()
+
+# --- TRAVA DE SEGURANÇA ---
+# O app só roda se o endereço não estiver em branco e a lat/lon forem preenchidas
+if endereco_origem == "" or lat_p == 0.0:
+    st.info("👋 Bem-vindo! Por favor, insira o **Endereço de Origem** e as **Coordenadas** na barra lateral para calcular as rotas.")
+    st.stop() # Interrompe a execução aqui até o preenchimento
 
     st.sidebar.header("🗺️ Filtros Geográficos")
     # Correção do Erro de Ordenação (Removendo NaNs e convertendo para String)
@@ -113,3 +119,4 @@ try:
 except Exception as e:
 
     st.error(f"Ocorreu um erro: {e}")
+
