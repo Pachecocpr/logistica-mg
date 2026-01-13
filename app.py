@@ -5,30 +5,26 @@ import plotly.express as px
 from io import BytesIO
 import numpy as np
 
-# 1. CONFIGURAÇÃO DA PÁGINA
+# 1. CONFIGURAÇÃO DA PÁGINA (MODO DARK E ÍCONE)
 st.set_page_config(page_title="Logística MG Pro", page_icon="🔄", layout="wide")
 
-# Função de cálculo de distância
+# Função de cálculo de distância (Haversine + Fator de Correção)
 def calcular_distancia(lat1, lon1, lat2, lon2):
     r = 6371 
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
     dphi, dlambda = np.radians(lat2 - lat1), np.radians(lon2 - lon1)
     a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
-    return (2 * r * np.arcsin(np.sqrt(a))) * 1.3 # Fator de correção estradas
+    return (2 * r * np.arcsin(np.sqrt(a))) * 1.3
 
-st.title("🔄 Otimizador Logístico MG:")
-
-try:
-    # Carregar dados
-    df_base = pd.read_csv('municipios_mg.csv')
+# Título com as setas circulares
+st.title("🔄 Otimizador Logístico: Saída e Retorno")
 
 # --- BARRA LATERAL (SIDEBAR) ---
 st.sidebar.header("📍 Configurações de Origem")
 
-# 1. Campo de endereço começando vazio
+# Campos começando em BRANCO/ZERO
 endereco_origem = st.sidebar.text_input("Endereço de Partida:", value="")
 
-# 2. Coordenadas começando zeradas ou vazias
 col_lat, col_lon = st.sidebar.columns(2)
 lat_p = col_lat.number_input("Lat Origem:", value=0.0, format="%.4f")
 lon_p = col_lon.number_input("Lon Origem:", value=0.0, format="%.4f")
@@ -36,13 +32,18 @@ lon_p = col_lon.number_input("Lon Origem:", value=0.0, format="%.4f")
 st.sidebar.divider()
 
 # --- TRAVA DE SEGURANÇA ---
-# O app só roda se o endereço não estiver em branco e a lat/lon forem preenchidas
+# Se o usuário não preencher a origem, o app para aqui e mostra instruções.
 if endereco_origem == "" or lat_p == 0.0:
-    st.info("👋 Bem-vindo! Por favor, insira o **Endereço de Origem** e as **Coordenadas** na barra lateral para calcular as rotas.")
-    st.stop() # Interrompe a execução aqui até o preenchimento
+    st.info("👋 **Bem-vindo!** Para gerar as rotas, preencha o **Endereço de Partida** e as **Coordenadas** na barra lateral.")
+    st.stop()
 
+# --- INÍCIO DO PROCESSAMENTO ---
+try:
+    # Carregar dados do arquivo enviado ao GitHub
+    df_base = pd.read_csv('municipios_mg.csv')
+
+    # Filtros Geográficos
     st.sidebar.header("🗺️ Filtros Geográficos")
-    # Correção do Erro de Ordenação (Removendo NaNs e convertendo para String)
     todas_regioes = sorted([str(r) for r in df_base['regiao'].dropna().unique()])
     regioes_selecionadas = st.sidebar.multiselect(
         "Filtrar por Região (Opcional):", 
@@ -51,13 +52,13 @@ if endereco_origem == "" or lat_p == 0.0:
 
     cidades_por_rota = st.sidebar.slider("Cidades por rota:", 2, 10, 3)
 
-    # --- FILTRAGEM DOS DADOS ---
+    # Aplicar filtros
     df = df_base.copy()
     if regioes_selecionadas:
         df = df[df['regiao'].isin(regioes_selecionadas)].copy()
 
     if not df.empty:
-        # Lógica de Agrupamento
+        # Lógica de Agrupamento (K-Means)
         n_clusters = max(1, len(df) // cidades_por_rota)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         df['ID_Rota'] = kmeans.fit_predict(df[['lat', 'lon']])
@@ -66,13 +67,13 @@ if endereco_origem == "" or lat_p == 0.0:
         for id_rota, grupo in df.groupby('ID_Rota'):
             grupo = grupo.reset_index()
             
-            # Cálculo de IDA (Origem -> Cidades)
+            # Cálculo de IDA (Origem -> Cidades -> Entre cidades)
             dist_ida = calcular_distancia(lat_p, lon_p, grupo.loc[0, 'lat'], grupo.loc[0, 'lon'])
             for i in range(len(grupo) - 1):
                 dist_ida += calcular_distancia(grupo.loc[i, 'lat'], grupo.loc[i, 'lon'], 
                                                grupo.loc[i+1, 'lat'], grupo.loc[i+1, 'lon'])
             
-            # Cálculo de RETORNO (Última Cidade -> Origem)
+            # Cálculo de RETORNO EXCLUSIVO (Última Cidade -> Origem)
             ultima_lat = grupo.loc[len(grupo)-1, 'lat']
             ultima_lon = grupo.loc[len(grupo)-1, 'lon']
             dist_retorno = calcular_distancia(ultima_lat, ultima_lon, lat_p, lon_p)
@@ -80,7 +81,6 @@ if endereco_origem == "" or lat_p == 0.0:
             relatorio.append({
                 'ID_Rota': id_rota + 1,
                 'Região': grupo['regiao'].iloc[0],
-                'Origem': endereco_origem,
                 'Itinerário': ' ➔ '.join(grupo['cidade']),
                 'Km Ida (Total)': round(dist_ida, 1),
                 'Tempo Ida': f"{int((dist_ida/60)//1)}h {int((dist_ida/60%1)*60)}min",
@@ -90,33 +90,27 @@ if endereco_origem == "" or lat_p == 0.0:
 
         df_rel = pd.DataFrame(relatorio)
 
-        # --- VISUALIZAÇÃO ---
+        # --- EXIBIÇÃO ---
         st.subheader(f"Logística partindo de: {endereco_origem}")
         
-        # Mapa Darkmatter
+        # Mapa Estilo Dark
         fig = px.scatter_mapbox(df, lat="lat", lon="lon", color="regiao", hover_name="cidade", zoom=5.5)
-        # Adicionar o ponto de origem no mapa (Ponto Vermelho)
         fig.add_scattermapbox(lat=[lat_p], lon=[lon_p], marker=dict(size=15, color='red'), name="ORIGEM")
-        fig.update_layout(mapbox_style="open-street-map", paper_bgcolor="#0e1117", font_color="white", showlegend=True)
+        fig.update_layout(mapbox_style="open-street-map", paper_bgcolor="#0e1117", font_color="white")
         st.plotly_chart(fig, use_container_width=True)
 
-        # Tabela e Exportação
+        # Tabela e Download
         st.dataframe(df_rel, use_container_width=True)
         
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_rel.to_excel(writer, index=False, sheet_name='Rotas_MG')
+            df_rel.to_excel(writer, index=False)
         
-        st.download_button(
-            label="📥 Baixar Planilha para Excel",
-            data=output.getvalue(),
-            file_name="planejamento_logistico_mg.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("📥 Baixar Planilha Excel", output.getvalue(), "rotas_logistica.xlsx")
     else:
-        st.warning("Selecione uma região ou verifique se o arquivo de dados está correto.")
+        st.warning("Nenhuma cidade encontrada para os filtros selecionados.")
 
+except FileNotFoundError:
+    st.error("Erro: O arquivo 'municipios_mg.csv' não foi encontrado no GitHub.")
 except Exception as e:
-
-    st.error(f"Ocorreu um erro: {e}")
-
+    st.error(f"Ocorreu um erro inesperado: {e}")
