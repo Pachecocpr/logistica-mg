@@ -6,7 +6,7 @@ from io import BytesIO
 import numpy as np
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Logística MG Pro", layout="wide")
+st.set_page_config(page_title="Logística MG Pro", page_icon="🔄", layout="wide")
 
 # Função de cálculo de distância
 def calcular_distancia(lat1, lon1, lat2, lon2):
@@ -16,7 +16,7 @@ def calcular_distancia(lat1, lon1, lat2, lon2):
     a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
     return (2 * r * np.arcsin(np.sqrt(a))) * 1.3 # Fator de correção estradas
 
-st.title("🌑 Otimizador Logístico MG: Versão Final")
+st.title("🔄 Otimizador Logístico MG:")
 
 try:
     # Carregar dados
@@ -111,4 +111,5 @@ try:
         st.warning("Selecione uma região ou verifique se o arquivo de dados está correto.")
 
 except Exception as e:
+
     st.error(f"Ocorreu um erro: {e}")
