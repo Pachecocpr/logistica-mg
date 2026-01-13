@@ -12,8 +12,7 @@ st.set_page_config(page_title="Logística MG Pro", page_icon="🔄", layout="wid
 # Função para buscar coordenadas
 def buscar_coordenadas(endereco):
     try:
-        # Definindo um user_agent único para evitar bloqueios
-        geolocator = Nominatim(user_agent="logistica_mg_pacheco_v1")
+        geolocator = Nominatim(user_agent="logistica_mg_pacheco_v3")
         location = geolocator.geocode(endereco)
         if location:
             return location.latitude, location.longitude
@@ -21,7 +20,7 @@ def buscar_coordenadas(endereco):
     except:
         return None, None
 
-# Função de distância
+# Função de distância (Haversine + 30% de margem para estradas)
 def calcular_distancia(lat1, lon1, lat2, lon2):
     r = 6371 
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
@@ -29,7 +28,7 @@ def calcular_distancia(lat1, lon1, lat2, lon2):
     a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
     return (2 * r * np.arcsin(np.sqrt(a))) * 1.3
 
-st.title("🔄 Otimizador Logístico: Saída e Retorno")
+st.title("🔄 Otimizador Logístico: Detalhamento Individual e Total")
 
 # --- BARRA LATERAL (SIDEBAR) ---
 st.sidebar.header("📍 Configurações de Origem")
@@ -56,7 +55,7 @@ lon_p = col_lon.number_input("Lon Origem:", value=st.session_state.get('lon_f', 
 st.sidebar.divider()
 
 if endereco_input == "" or lat_p == 0.0:
-    st.info("👋 **Bem-vindo!** Digite o endereço e clique em **Buscar Coordenadas** para iniciar.")
+    st.info("👋 **Bem-vindo!** Insira a origem para gerar o relatório com distâncias individuais e totais.")
     st.stop()
 
 # --- PROCESSAMENTO ---
@@ -80,38 +79,56 @@ try:
         relatorio = []
         for id_rota, grupo in df.groupby('ID_Rota'):
             grupo = grupo.reset_index()
+            
+            # 1. CÁLCULO DE IDA (Origem -> Cidades -> Cidades)
             dist_ida = calcular_distancia(lat_p, lon_p, grupo.loc[0, 'lat'], grupo.loc[0, 'lon'])
             for i in range(len(grupo) - 1):
                 dist_ida += calcular_distancia(grupo.loc[i, 'lat'], grupo.loc[i, 'lon'], grupo.loc[i+1, 'lat'], grupo.loc[i+1, 'lon'])
             
+            # 2. CÁLCULO DE RETORNO (Última Cidade -> Origem)
             dist_retorno = calcular_distancia(grupo.loc[len(grupo)-1, 'lat'], grupo.loc[len(grupo)-1, 'lon'], lat_p, lon_p)
             
+            # 3. CÁLCULOS TOTAIS (SOMAS)
+            km_total = dist_ida + dist_retorno
+            
+            # Formatação de Tempo (Base 60km/h)
+            def formatar_tempo(km):
+                horas = km / 60
+                return f"{int(horas//1)}h {int((horas%1)*60)}min"
+
             relatorio.append({
                 'ID_Rota': id_rota + 1,
                 'Região': grupo['regiao'].iloc[0],
                 'Itinerário': ' ➔ '.join(grupo['cidade']),
-                'Km Ida (Total)': round(dist_ida, 1),
-                'Tempo Ida': f"{int((dist_ida/60)//1)}h {int((dist_ida/60%1)*60)}min",
+                'Km Ida': round(dist_ida, 1),
+                'Tempo Ida': formatar_tempo(dist_ida),
                 'Km Retorno': round(dist_retorno, 1),
-                'Tempo Retorno': f"{int((dist_retorno/60)//1)}h {int((dist_retorno/60%1)*60)}min"
+                'Tempo Retorno': formatar_tempo(dist_retorno),
+                'KM TOTAL (SOMA)': round(km_total, 1),
+                'TEMPO TOTAL (SOMA)': formatar_tempo(km_total)
             })
 
         df_rel = pd.DataFrame(relatorio)
-        st.subheader(f"Logística partindo de: {endereco_input}")
+        
+        # Interface Visual
+        st.subheader(f"📍 Origem: {endereco_input}")
         
         fig = px.scatter_mapbox(df, lat="lat", lon="lon", color="regiao", hover_name="cidade", zoom=5.5)
         fig.add_scattermapbox(lat=[lat_p], lon=[lon_p], marker=dict(size=15, color='red'), name="ORIGEM")
         fig.update_layout(mapbox_style="open-street-map", paper_bgcolor="#0e1117", font_color="white")
         st.plotly_chart(fig, use_container_width=True)
 
+        # Exibição da Tabela com Tudo
+        st.write("### Detalhamento das Rotas")
         st.dataframe(df_rel, use_container_width=True)
         
+        # Download
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_rel.to_excel(writer, index=False)
-        st.download_button("📥 Baixar Planilha Excel", output.getvalue(), "rotas_logistica.xlsx")
+        st.download_button("📥 Baixar Planilha Completa (Excel)", output.getvalue(), "logistica_completa_mg.xlsx")
     else:
-        st.warning("Selecione uma região para processar.")
+        st.warning("Selecione uma região para gerar os dados.")
 
 except Exception as e:
-    st.error(f"Erro ao processar dados: {e}")
+    st.error(f"Erro ao processar: {e}")
