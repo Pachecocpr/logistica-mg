@@ -28,7 +28,7 @@ def calcular_distancia(lat1, lon1, lat2, lon2):
     a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
     return (2 * r * np.arcsin(np.sqrt(a))) * 1.3
 
-st.title("🔄 Otimizador Logístico: Detalhamento Individual e Total")
+st.title("🔄 Otimizador Logístico:")
 
 # --- BARRA LATERAL (SIDEBAR) ---
 st.sidebar.header("📍 Configurações de Origem")
@@ -132,3 +132,4 @@ try:
 
 except Exception as e:
     st.error(f"Erro ao processar: {e}")
+
