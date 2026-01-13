@@ -55,7 +55,7 @@ lon_p = col_lon.number_input("Lon Origem:", value=st.session_state.get('lon_f', 
 st.sidebar.divider()
 
 if endereco_input == "" or lat_p == 0.0:
-    st.info("👋 **Bem-vindo!** Insira a origem para gerar o relatório com distâncias individuais e totais.")
+    st.info("👋 **Bem-vindo!** Insira a origem, em seguida selecione a região, a quantidade de cidades por rota desejada para o relatório de viagem.")
     st.stop()
 
 # --- PROCESSAMENTO ---
@@ -132,4 +132,5 @@ try:
 
 except Exception as e:
     st.error(f"Erro ao processar: {e}")
+
 
