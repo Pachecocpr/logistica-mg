@@ -6,31 +6,41 @@ from io import BytesIO
 import numpy as np
 from geopy.geocoders import Nominatim
 import time
+import re
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Logística Pro v9", page_icon="🚚", layout="wide")
+st.set_page_config(page_title="Logística Pro v10", page_icon="🚚", layout="wide")
 
-# --- FUNÇÕES TÉCNICAS ---
-
+# --- FUNÇÃO DE BUSCA REFORÇADA ---
 def buscar_coordenadas(local):
-    """Busca coordenadas com reforço de localização para Minas Gerais."""
-    try:
-        # User-agent único e timeout longo para estabilidade
-        geolocator = Nominatim(user_agent="logistica_mg_pacheco_v9", timeout=15)
-        
-        # Reforça a busca para dentro de Minas Gerais se não houver país/estado especificado
-        if "Minas Gerais" not in local:
-            local = f"{local}, Minas Gerais, Brazil"
+    """Busca coordenadas com limpeza de texto e múltiplas tentativas."""
+    # Limpeza básica: remove símbolos que confundem o GPS
+    local_limpo = re.sub(r'[^\w\s,]', '', local)
+    
+    tentativas = 3
+    for i in range(tentativas):
+        try:
+            # Identificador único para evitar bloqueio
+            geolocator = Nominatim(user_agent="logistica_mg_pacheco_v10", timeout=15)
+            location = geolocator.geocode(local_limpo + ", Minas Gerais, Brazil")
             
-        location = geolocator.geocode(local)
-        if location:
-            return location.latitude, location.longitude
-        return None, None
-    except Exception:
-        return None, None
+            if location:
+                return location.latitude, location.longitude
+            
+            # Se falhar o endereço completo, tenta apenas a cidade
+            if "," in local_limpo:
+                cidade_fallback = local_limpo.split(",")[-1].strip()
+                location = geolocator.geocode(cidade_fallback + ", MG, Brazil")
+                if location:
+                    return location.latitude, location.longitude
+                    
+            return None, None
+        except Exception:
+            time.sleep(2) # Espera 2 segundos antes de tentar de novo
+            continue
+    return None, None
 
 def calcular_distancia(lat1, lon1, lat2, lon2):
-    """Haversine com 30% de margem para estradas."""
     r = 6371 
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
     dphi, dlambda = np.radians(lat2 - lat1), np.radians(lon2 - lon1)
@@ -42,24 +52,24 @@ def formatar_tempo(km):
     return f"{int(horas//1)}h {int((horas%1)*60)}min"
 
 # --- INTERFACE ---
-st.title("🔄 Otimizador Logístico: Minas Gerais")
+st.title("🔄 Otimizador Logístico: Versão Estabilizada")
 modo = st.sidebar.selectbox("Modo de Trabalho:", ["Base Fixa (MG)", "Importar CSV Customizado"])
 
 st.sidebar.divider()
 
 # --- ORIGEM ---
 st.sidebar.header("📍 Ponto de Partida")
-endereco_origem = st.sidebar.text_input("Endereço de Saída:", placeholder="Ex: Rua Simão Antonio, 149, Contagem, MG")
+endereco_origem = st.sidebar.text_input("Endereço de Saída:", placeholder="Ex: Rua Simao Antonio, 149, Contagem")
 
 if st.sidebar.button("🔍 Validar e Fixar Origem"):
     if endereco_origem:
-        with st.spinner('Localizando ponto de partida...'):
+        with st.spinner('Validando no mapa...'):
             lat_o, lon_o = buscar_coordenadas(endereco_origem)
             if lat_o:
                 st.session_state['lat_o'], st.session_state['lon_o'] = lat_o, lon_o
-                st.sidebar.success("Origem fixada!")
+                st.sidebar.success(f"Origem Fixada! (Lat: {lat_o:.4f})")
             else:
-                st.sidebar.error("Origem não encontrada. Tente: 'Cidade, MG'")
+                st.sidebar.error("Endereço não reconhecido. Tente usar apenas 'Cidade, MG'.")
     else:
         st.sidebar.warning("Digite a origem.")
 
@@ -69,13 +79,13 @@ if 'lat_o' not in st.session_state:
 
 lat_p, lon_p = st.session_state['lat_o'], st.session_state['lon_o']
 
-# --- DADOS ---
+# --- PROCESSAMENTO DE DADOS ---
 df_final = pd.DataFrame()
 
 if modo == "Base Fixa (MG)":
     try:
         df_base = pd.read_csv('municipios_mg.csv')
-        st.sidebar.header("🗺️ Filtros de Região")
+        st.sidebar.header("🗺️ Filtros")
         regioes = sorted(df_base['regiao'].dropna().unique())
         selecao = st.sidebar.multiselect("Selecione as Regiões:", options=regioes)
         
@@ -83,22 +93,21 @@ if modo == "Base Fixa (MG)":
             df_final = df_base[df_base['regiao'].isin(selecao)].copy()
             df_final['label_cidade'] = df_final['cidade'].astype(str).str.strip()
             
-            # Se a base fixa não tiver Lat/Lon, vamos buscar agora
+            # Se a base fixa não tiver Lat/Lon, busca com pausa de segurança
             if 'lat' not in df_final.columns or df_final['lat'].isnull().any():
-                st.info("Buscando coordenadas das cidades selecionadas...")
+                st.info("Buscando coordenadas das cidades...")
                 lats, lons = [], []
                 barra = st.progress(0)
                 for i, cid in enumerate(df_final['label_cidade']):
                     lt, ln = buscar_coordenadas(cid)
                     lats.append(lt); lons.append(ln)
                     barra.progress((i+1)/len(df_final))
-                    time.sleep(1.1)
+                    time.sleep(1.2) # Pausa para evitar bloqueio
                 df_final['lat'], df_final['lon'] = lats, lons
         else:
             st.stop()
     except Exception as e:
-        st.error(f"Erro ao carregar base fixa: {e}")
-        st.stop()
+        st.error(f"Erro na base: {e}"); st.stop()
 
 else: # MODO IMPORTAÇÃO
     arquivo = st.sidebar.file_uploader("Suba o CSV (Colunas 3, 4 e 8)", type=["csv"])
@@ -111,17 +120,14 @@ else: # MODO IMPORTAÇÃO
             df_final['municipio'] = df_import.iloc[:, 7].astype(str).str.strip()
             df_final['label_cidade'] = df_final['municipio']
             
-            st.info("📍 Mapeando endereços do arquivo...")
+            st.info("📍 Mapeando endereços...")
             barra = st.progress(0)
             lats, lons = [], []
             for i, row in df_final.iterrows():
-                # Tenta Endereço Completo
                 lt, ln = buscar_coordenadas(f"{row['rua']}, {row['numero']}, {row['municipio']}")
-                if not lt: # Tenta só Cidade
-                    lt, ln = buscar_coordenadas(row['municipio'])
                 lats.append(lt); lons.append(ln)
                 barra.progress((i+1)/len(df_final))
-                time.sleep(1.1)
+                time.sleep(1.2)
             
             df_final['lat'], df_final['lon'] = lats, lons
         except Exception as e:
@@ -129,7 +135,7 @@ else: # MODO IMPORTAÇÃO
     else:
         st.stop()
 
-# --- ROTAS ---
+# --- GERAÇÃO DE ROTAS ---
 df_final = df_final.dropna(subset=['lat', 'lon'])
 
 if not df_final.empty:
@@ -156,7 +162,7 @@ if not df_final.empty:
             'TEMPO TOTAL': formatar_tempo(km_s)
         })
 
-    st.subheader("📊 Relatório Final")
+    st.subheader("📊 Relatório Final Otimizado")
     st.dataframe(pd.DataFrame(relatorio_dados), use_container_width=True)
     
     fig = px.scatter_mapbox(df_final, lat="lat", lon="lon", color="ID_Rota", hover_name="label_cidade", zoom=5.5)
