@@ -8,9 +8,9 @@ from geopy.geocoders import Nominatim
 import time
 
 # 1. CONFIGURAÇÃO DA PÁGINA
-st.set_page_config(page_title="Logística MG Pro v2", page_icon="🚚", layout="wide")
+st.set_page_config(page_title="Logística Pro - Relatório por Trecho", page_icon="🚚", layout="wide")
 
-geolocator = Nominatim(user_agent="logistica_pacheco_v7")
+geolocator = Nominatim(user_agent="logistica_pacheco_v8")
 
 # --- FUNÇÕES ---
 def buscar_coordenadas(local):
@@ -31,15 +31,12 @@ def formatar_tempo(km):
     horas = km / 60
     return f"{int(horas//1)}h {int((horas%1)*60)}min"
 
-# --- TÍTULO E MENU ---
-st.title("🔄 Sistema Integrado de Otimização Logística")
-modo = st.sidebar.selectbox("Selecione o Modo de Operação:", ["Base Fixa (MG)", "Importação Manual (CSV)"])
+st.title("🔄 Otimizador Logístico: Relatório Detalhado por Trecho")
+modo = st.sidebar.selectbox("Modo de Operação:", ["Base Fixa (MG)", "Importação Manual (CSV)"])
 
 st.sidebar.divider()
-
-# --- CONFIGURAÇÃO DE ORIGEM ---
 st.sidebar.header("📍 Ponto de Partida")
-endereco_origem = st.sidebar.text_input("Endereço de Saída:", placeholder="Rua, Número, Cidade, MG")
+endereco_origem = st.sidebar.text_input("Endereço de Saída:", value="", placeholder="Rua, Número, Cidade, MG")
 
 if st.sidebar.button("🔍 Validar Origem"):
     lat_o, lon_o = buscar_coordenadas(endereco_origem)
@@ -49,8 +46,8 @@ if st.sidebar.button("🔍 Validar Origem"):
     else:
         st.sidebar.error("Origem não encontrada.")
 
-if 'lat_o' not in st.session_state:
-    st.info("👋 **Bem-vindo!** Para começar, valide seu endereço de origem na barra lateral.")
+if 'lat_o' not in st.session_state or endereco_origem == "":
+    st.info("👋 Por favor, valide seu endereço de origem para começar.")
     st.stop()
 
 lat_p, lon_p = st.session_state['lat_o'], st.session_state['lon_o']
@@ -61,93 +58,89 @@ df_final = pd.DataFrame()
 if modo == "Base Fixa (MG)":
     try:
         df_base = pd.read_csv('municipios_mg.csv')
-        st.sidebar.header("🗺️ Filtros MG")
         regioes = sorted(df_base['regiao'].dropna().unique())
         selecao = st.sidebar.multiselect("Regiões de Minas:", options=regioes)
-        
         if selecao:
             df_final = df_base[df_base['regiao'].isin(selecao)].copy()
             df_final['nome_exibicao'] = df_final['cidade']
         else:
-            st.warning("Selecione ao menos uma região para carregar os dados.")
+            st.warning("Selecione uma região.")
             st.stop()
     except:
-        st.error("Erro ao carregar 'municipios_mg.csv'. Verifique se o arquivo está no GitHub.")
+        st.error("Erro no arquivo municipios_mg.csv")
         st.stop()
-
-else: # MODO IMPORTAÇÃO
-    arquivo = st.sidebar.file_uploader("Suba seu CSV (Colunas 3, 4 e 8):", type=["csv"])
+else:
+    arquivo = st.sidebar.file_uploader("Suba seu CSV:", type=["csv"])
     if arquivo:
-        try:
-            df_import = pd.read_csv(arquivo, encoding='iso-8859-1', sep=None, engine='python')
-            df_final = pd.DataFrame()
-            # Pega Rua (2), Numero (3) e Município (7)
-            df_final['rua'] = df_import.iloc[:, 2].astype(str)
-            df_final['numero'] = df_import.iloc[:, 3].astype(str)
-            df_final['municipio'] = df_import.iloc[:, 7].astype(str)
-            df_final['nome_exibicao'] = df_final['municipio']
-            
-            # Geocodificação Automática
-            st.info(f"Buscando coordenadas para {len(df_final)} destinos...")
-            prog = st.progress(0)
-            lats, lons = [], []
-            for i, row in df_final.iterrows():
-                end = f"{row['rua']}, {row['numero']}, {row['municipio']}, MG"
-                lt, ln = buscar_coordenadas(end)
-                if not lt: lt, ln = buscar_coordenadas(f"{row['municipio']}, MG")
-                lats.append(lt); lons.append(ln)
-                prog.progress((i+1)/len(df_final))
-                time.sleep(0.5) # Delay menor para agilizar
-            
-            df_final['lat'], df_final['lon'] = lats, lons
-            df_final = df_final.dropna(subset=['lat', 'lon'])
-        except Exception as e:
-            st.error(f"Erro na importação: {e}")
-            st.stop()
+        df_import = pd.read_csv(arquivo, encoding='iso-8859-1', sep=None, engine='python')
+        df_final = pd.DataFrame()
+        df_final['nome_exibicao'] = df_import.iloc[:, 7].astype(str) # Município
+        df_final['rua'] = df_import.iloc[:, 2].astype(str)
+        df_final['num'] = df_import.iloc[:, 3].astype(str)
+        
+        st.info("Buscando coordenadas...")
+        prog = st.progress(0)
+        lats, lons = [], []
+        for i, row in df_final.iterrows():
+            end = f"{row['rua']}, {row['num']}, {row['nome_exibicao']}, MG"
+            lt, ln = buscar_coordenadas(end)
+            if not lt: lt, ln = buscar_coordenadas(f"{row['nome_exibicao']}, MG")
+            lats.append(lt); lons.append(ln)
+            prog.progress((i+1)/len(df_final))
+            time.sleep(0.5)
+        df_final['lat'], df_final['lon'] = lats, lons
+        df_final = df_final.dropna(subset=['lat', 'lon'])
     else:
-        st.info("Aguardando upload do arquivo CSV...")
         st.stop()
 
-# --- CÁLCULO DE ROTAS (COMUM PARA OS DOIS MODOS) ---
+# --- ROTEIRIZAÇÃO E RELATÓRIO POR TRECHO ---
 if not df_final.empty:
-    st.sidebar.divider()
     capacidade = st.sidebar.slider("Paradas por caminhão:", 2, 15, 5)
-    
     n_clusters = max(1, len(df_final) // capacidade)
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     df_final['ID_Rota'] = kmeans.fit_predict(df_final[['lat', 'lon']])
 
-    relatorio = []
+    trechos = []
     for id_r, grupo in df_final.groupby('ID_Rota'):
         grupo = grupo.reset_index()
-        d_ida = calcular_distancia(lat_p, lon_p, grupo.loc[0, 'lat'], grupo.loc[0, 'lon'])
+        rota_num = id_r + 1
+        
+        # 1. Primeiro Trecho: Origem -> Primeira Cidade
+        d = calcular_distancia(lat_p, lon_p, grupo.loc[0, 'lat'], grupo.loc[0, 'lon'])
+        trechos.append({
+            'Rota': rota_num, 'De': 'ORIGEM (Ponto de Partida)', 'Para': grupo.loc[0, 'nome_exibicao'],
+            'KM Trecho': round(d, 1), 'Tempo Trecho': formatar_tempo(d), 'Tipo': 'IDA'
+        })
+        
+        # 2. Trechos entre Cidades
         for j in range(len(grupo)-1):
-            d_ida += calcular_distancia(grupo.loc[j, 'lat'], grupo.loc[j, 'lon'], grupo.loc[j+1, 'lat'], grupo.loc[j+1, 'lon'])
+            d = calcular_distancia(grupo.loc[j, 'lat'], grupo.loc[j, 'lon'], grupo.loc[j+1, 'lat'], grupo.loc[j+1, 'lon'])
+            trechos.append({
+                'Rota': rota_num, 'De': grupo.loc[j, 'nome_exibicao'], 'Para': grupo.loc[j+1, 'nome_exibicao'],
+                'KM Trecho': round(d, 1), 'Tempo Trecho': formatar_tempo(d), 'Tipo': 'ENTRE CIDADES'
+            })
         
-        d_ret = calcular_distancia(grupo.loc[len(grupo)-1, 'lat'], grupo.loc[len(grupo)-1, 'lon'], lat_p, lon_p)
-        km_t = d_ida + d_ret
-        
-        relatorio.append({
-            'Rota': id_r + 1,
-            'Itinerário': ' ➔ '.join(grupo['nome_exibicao'].unique()),
-            'KM Ida': round(d_ida, 1),
-            'KM Retorno': round(d_ret, 1),
-            'KM TOTAL': round(km_t, 1),
-            'TEMPO TOTAL': formatar_tempo(km_t)
+        # 3. Último Trecho: Última Cidade -> Origem
+        d = calcular_distancia(grupo.loc[len(grupo)-1, 'lat'], grupo.loc[len(grupo)-1, 'lon'], lat_p, lon_p)
+        trechos.append({
+            'Rota': rota_num, 'De': grupo.loc[len(grupo)-1, 'nome_exibicao'], 'Para': 'ORIGEM (Retorno)',
+            'KM Trecho': round(d, 1), 'Tempo Trecho': formatar_tempo(d), 'Tipo': 'RETORNO'
         })
 
+    df_rel_trechos = pd.DataFrame(trechos)
+
     # --- EXIBIÇÃO ---
-    st.subheader(f"📊 Relatório Otimizado - Partida: {endereco_origem}")
-    st.dataframe(pd.DataFrame(relatorio), use_container_width=True)
+    st.subheader("📊 Itinerário Detalhado (Trecho a Trecho)")
+    st.dataframe(df_rel_trechos, use_container_width=True)
     
+    # Mapa
     fig = px.scatter_mapbox(df_final, lat="lat", lon="lon", color="ID_Rota", hover_name="nome_exibicao", zoom=6)
     fig.add_scattermapbox(lat=[lat_p], lon=[lon_p], marker=dict(size=14, color='red'), name="ORIGEM")
     fig.update_layout(mapbox_style="open-street-map", margin={"r":0,"t":0,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
 
-    # Download Excel
+    # Download
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        pd.DataFrame(relatorio).to_excel(writer, index=False)
-    st.download_button("📥 Baixar Relatório (Excel)", output.getvalue(), "relatorio_logistica.xlsx")
-
+        df_rel_trechos.to_excel(writer, index=False)
+    st.download_button("📥 Baixar Planilha de Trechos", output.getvalue(), "itinerario_detalhado.xlsx")
