@@ -52,7 +52,8 @@ if st.sidebar.button("🔍 Validar Origem"):
         st.sidebar.error("Origem não encontrada.")
 
 # --- PROCESSAMENTO ---
-if arquivo_upload and 'lat_o' in st.session_state:
+# Tenta ler com encoding Latin-1 (comum no Excel/Windows)
+df_import = pd.read_csv(arquivo_upload, encoding='iso-8859-1', sep=None, engine='python')
     try:
         # Lê o CSV sem assumir nomes de colunas fixos
         df_import = pd.read_csv(arquivo_upload)
@@ -137,3 +138,4 @@ if arquivo_upload and 'lat_o' in st.session_state:
         st.error(f"Erro ao ler colunas do CSV: {e}")
 else:
     st.info("Aguardando upload do CSV e validação da Origem.")
+
