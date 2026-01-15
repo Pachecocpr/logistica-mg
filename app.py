@@ -32,7 +32,7 @@ def formatar_tempo(km):
     return f"{int(horas//1)}h {int((horas%1)*60)}min"
 
 # --- TÍTULO E MENU ---
-st.title("🚚 Sistema Integrado de Otimização Logística")
+st.title("🔄 Sistema Integrado de Otimização Logística")
 modo = st.sidebar.selectbox("Selecione o Modo de Operação:", ["Base Fixa (MG)", "Importação Manual (CSV)"])
 
 st.sidebar.divider()
@@ -142,7 +142,7 @@ if not df_final.empty:
     
     fig = px.scatter_mapbox(df_final, lat="lat", lon="lon", color="ID_Rota", hover_name="nome_exibicao", zoom=6)
     fig.add_scattermapbox(lat=[lat_p], lon=[lon_p], marker=dict(size=14, color='red'), name="ORIGEM")
-    fig.update_layout(mapbox_style="carto-darkmatter", margin={"r":0,"t":0,"l":0,"b":0})
+    fig.update_layout(mapbox_style="open-street-map", margin={"r":0,"t":0,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
 
     # Download Excel
@@ -150,3 +150,4 @@ if not df_final.empty:
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         pd.DataFrame(relatorio).to_excel(writer, index=False)
     st.download_button("📥 Baixar Relatório (Excel)", output.getvalue(), "relatorio_logistica.xlsx")
+
